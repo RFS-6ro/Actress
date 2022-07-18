@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Actress
 {
-    class Observable<T> : IObservable<T>, IObserver<T>, IDisposable
+    public class Observable<T> : IObservable<T>, IObserver<T>, IDisposable
     {
         public Observable()
         {
@@ -15,7 +15,9 @@ namespace Actress
         public IDisposable Subscribe(IObserver<T> observer)
         {
             if (!_observers.Contains(observer))
+            {
                 _observers.Add(observer);
+            }
 
             return new Unsubscriber(_observers, observer);
         }
@@ -27,14 +29,16 @@ namespace Actress
 
             public Unsubscriber(List<IObserver<T>> observers, IObserver<T> observer)
             {
-                this._observers = observers;
-                this._observer = observer;
+                _observers = observers;
+                _observer = observer;
             }
 
             public void Dispose()
             {
                 if (_observer != null && _observers.Contains(_observer))
+                {
                     _observers.Remove(_observer);
+                }
             }
         }
 
@@ -56,13 +60,18 @@ namespace Actress
         private void CallOnObservers(Action<IObserver<T>> action)
         {
             foreach (var observer in _observers.ToArray())
+            {
                 if (_observers.Contains(observer))
+                {
                     action(observer);
+                }
+            }
+
         }
 
         public void Dispose()
         {
-            this.OnCompleted();
+            OnCompleted();
             _observers.Clear();
         }
     }

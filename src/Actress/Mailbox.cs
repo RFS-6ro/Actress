@@ -5,57 +5,81 @@ namespace Actress
     using System.Threading;
     using System.Threading.Tasks;
 
-    internal class Mailbox<TMsg> : IDisposable
+    public class Mailbox<TMsg> : IDisposable
     {
         private readonly Queue<TMsg> _arrivals;
         private List<TMsg> _inboxStore;
         private TaskCompletionSource<bool> _savedCont;
-        private AutoResetEvent pulse;
+        private AutoResetEvent _autoResetEvent;
 
         public Mailbox()
         {
-            this._arrivals = new Queue<TMsg>();
+            _arrivals = new Queue<TMsg>();
         }
 
         public int CurrentQueueLength
         {
             get
             {
-                lock (this._arrivals)
+                lock (_arrivals)
                 {
-                    return this.Inbox.Count + this._arrivals.Count;
+                    return Inbox.Count + _arrivals.Count;
                 }
             }
         }
 
-        private List<TMsg> Inbox => this._inboxStore ?? (this._inboxStore = new List<TMsg>(1));
+        public List<TMsg> Inbox
+        {
+            get
+            {
+                if (_inboxStore == null)
+                {
+                    _inboxStore = new List<TMsg>(1);
+                }
+
+                return _inboxStore;
+            }
+        }
+
+        public AutoResetEvent AutoResetEvent
+        {
+            get
+            {
+                if (_autoResetEvent == null)
+                {
+                    _autoResetEvent = new AutoResetEvent(false);
+                }
+
+                return _autoResetEvent;
+            }
+        }
 
         public void Dispose()
         {
-            this.pulse?.Dispose();
+            _autoResetEvent?.Dispose();
         }
 
         internal TMsg ReceiveFromArrivalsUnsafe()
         {
-            if (this._arrivals.Count == 0)
+            if (_arrivals.Count == 0)
             {
                 return default(TMsg);
             }
 
-            return this._arrivals.Dequeue();
+            return _arrivals.Dequeue();
         }
 
         internal TMsg ReceiveFromArrivals()
         {
-            lock (this._arrivals)
+            lock (_arrivals)
             {
-                return this.ReceiveFromArrivalsUnsafe();
+                return ReceiveFromArrivalsUnsafe();
             }
         }
 
         internal TMsg ReceiveFromInbox()
         {
-            var list = this._inboxStore;
+            var list = _inboxStore;
             if (list == null)
             {
                 return default(TMsg);
@@ -73,25 +97,25 @@ namespace Actress
 
         internal void Post(TMsg msg)
         {
-            lock (this._arrivals)
+            lock (_arrivals)
             {
-                this._arrivals.Enqueue(msg);
+                _arrivals.Enqueue(msg);
 
                 // This is called when we enqueue a message, within a lock
                 // We cooperatively unblock any waiting reader. If there is no waiting
                 // reader we just leave the message in the incoming queue
-                if (this._savedCont == null)
+                if (_savedCont == null)
                 {
                     /* either no one is waiting(pulse is null) and leaving the message in the queue is sufficient....
                      * OR pulse is not null and someone is waiting on the wait handle
                     */
-                    this.pulse?.Set();
+                    _autoResetEvent?.Set();
 
                     return;
                 }
 
-                var sc = this._savedCont;
-                this._savedCont = null;
+                var sc = _savedCont;
+                _savedCont = null;
                 sc.SetResult(true);
             }
         }
@@ -102,13 +126,13 @@ namespace Actress
             {
                 while (true)
                 {
-                    var res = this.ReceiveFromArrivals();
+                    var res = ReceiveFromArrivals();
                     if (res != null)
                     {
                         return res;
                     }
 
-                    var ok = await this.WaitOne(timeout);
+                    var ok = await WaitOne(timeout);
                     if (ok)
                     {
                         continue;
@@ -118,7 +142,7 @@ namespace Actress
                 }
             }
 
-            var resFromInbox = this.ReceiveFromInbox();
+            var resFromInbox = ReceiveFromInbox();
             if (resFromInbox == null)
             {
                 return await ProcessFirstArrival();
@@ -134,18 +158,18 @@ namespace Actress
             {
                 while (true)
                 {
-                    var resP1 = this.ScanArrivals(f);
+                    var resP1 = ScanArrivals(f);
                     if (resP1 != null)
                     {
                         timeoutCts1.Cancel();
                         return await resP1;
                     }
 
-                    var waitTask = this.WaitOneNoTimeout();
+                    var waitTask = WaitOneNoTimeout();
                     var t = await Task.WhenAny(waitTask, timeoutTask1);
                     if (t == timeoutTask1)
                     {
-                        lock (this._arrivals)
+                        lock (_arrivals)
                         {
                             // Cancel the outstanding wait for messages installed by waitOneNoTimeout
                             //
@@ -159,7 +183,7 @@ namespace Actress
                             // This ugly non-compositionality is only needed because we only support a single mailbox reader
                             // (i.e. the user is not allowed to run several Recieve/TryRecieve/Scan/TryScan in parallel) - otherwise
                             // we would just have an extra no-op reader in the queue.
-                            this._savedCont = null;
+                            _savedCont = null;
                         }
 
                         return null;
@@ -176,13 +200,13 @@ namespace Actress
             {
                 while (true)
                 {
-                    var resP1 = this.ScanArrivals(f);
+                    var resP1 = ScanArrivals(f);
                     if (resP1 != null)
                     {
                         return await resP1;
                     }
 
-                    var ok = await this.WaitOneNoTimeout();
+                    var ok = await WaitOneNoTimeout();
                     if (ok)
                     {
                         continue;
@@ -192,7 +216,7 @@ namespace Actress
                 }
             }
 
-            var resP = this.ScanInbox(f, 0);
+            var resP = ScanInbox(f, 0);
             if (resP != null)
             {
                 return await resP;
@@ -213,7 +237,7 @@ namespace Actress
         internal async Task<T> Scan<T>(Func<TMsg, Task<T>> f, int timeout)
             where T : class
         {
-            var resOpt = await this.TryScan(f, timeout);
+            var resOpt = await TryScan(f, timeout);
 
             if (resOpt == null)
             {
@@ -229,13 +253,13 @@ namespace Actress
             {
                 while (true)
                 {
-                    var res = this.ReceiveFromArrivals();
+                    var res = ReceiveFromArrivals();
                     if (res != null)
                     {
                         return res;
                     }
 
-                    var ok = await this.WaitOne(timeout);
+                    var ok = await WaitOne(timeout);
                     if (ok)
                     {
                         continue;
@@ -245,7 +269,7 @@ namespace Actress
                 }
             }
 
-            var resFromInbox = this.ReceiveFromInbox();
+            var resFromInbox = ReceiveFromInbox();
             if (resFromInbox == null)
             {
                 return await ProcessFirstArrival();
@@ -254,14 +278,9 @@ namespace Actress
             return resFromInbox;
         }
 
-        private AutoResetEvent EnsurePulse()
-        {
-            return this.pulse ?? (this.pulse = new AutoResetEvent(false));
-        }
-
         private async Task<bool> WaitOneNoTimeout()
         {
-            if (this._savedCont != null)
+            if (_savedCont != null)
             {
                 throw new Exception("multiple waiting reader continuations for mailbox");
             }
@@ -269,11 +288,11 @@ namespace Actress
             bool descheduled;
 
             // An arrival may have happened while we're preparing to deschedule
-            lock (this._arrivals)
+            lock (_arrivals)
             {
-                if (this._arrivals.Count == 0)
+                if (_arrivals.Count == 0)
                 {
-                    this._savedCont = new TaskCompletionSource<bool>();
+                    _savedCont = new TaskCompletionSource<bool>();
                     descheduled = true;
                 }
                 else
@@ -284,7 +303,7 @@ namespace Actress
 
             if (descheduled)
             {
-                return await this._savedCont.Task;
+                return await _savedCont.Task;
             }
 
             // If we didn't deschedule then run the continuation immediately
@@ -295,25 +314,25 @@ namespace Actress
         {
             if (timeout < 0)
             {
-                return this.WaitOneNoTimeout();
+                return WaitOneNoTimeout();
             }
 
-            return this.EnsurePulse().ToTask(TimeSpan.FromMilliseconds(timeout));
+            return AutoResetEvent.ToTask(TimeSpan.FromMilliseconds(timeout));
         }
 
         private T ScanArrivalsUnsafe<T>(Func<TMsg, T> f)
             where T : class
         {
-            while (this._arrivals.Count != 0)
+            while (_arrivals.Count != 0)
             {
-                var msg = this._arrivals.Dequeue();
+                var msg = _arrivals.Dequeue();
                 var res = f(msg);
                 if (res != null)
                 {
                     return res;
                 }
 
-                this.Inbox.Add(msg);
+                Inbox.Add(msg);
             }
 
             return null;
@@ -322,9 +341,9 @@ namespace Actress
         private T ScanArrivals<T>(Func<TMsg, T> f)
             where T : class
         {
-            lock (this._arrivals)
+            lock (_arrivals)
             {
-                return this.ScanArrivalsUnsafe(f);
+                return ScanArrivalsUnsafe(f);
             }
         }
 
@@ -333,17 +352,17 @@ namespace Actress
         {
             while (true)
             {
-                if (this._inboxStore == null)
+                if (_inboxStore == null)
                 {
                     return null;
                 }
 
-                if (n >= this.Inbox.Count)
+                if (n >= Inbox.Count)
                 {
                     return null;
                 }
 
-                var msg = this.Inbox[n];
+                var msg = Inbox[n];
                 var res = f(msg);
                 if (res == null)
                 {
@@ -351,7 +370,7 @@ namespace Actress
                     continue;
                 }
 
-                this.Inbox.RemoveAt(n);
+                Inbox.RemoveAt(n);
                 return res;
             }
         }

@@ -25,26 +25,28 @@ namespace Actress
 
         public MailboxProcessor(Func<MailboxProcessor<TMsg>, Task> body, CancellationToken? cancellationToken = null)
         {
-            this._body = body;
-            this._cancellationToken = cancellationToken ?? Task.Factory.CancellationToken;
-            this._mailbox = new Mailbox<TMsg>();
-            this.DefaultTimeout = Timeout.Infinite;
-            this._started = false;
-            this._errorEvent = new Observable<Exception>();
+            _body = body;
+            _cancellationToken = cancellationToken ?? Task.Factory.CancellationToken;
+            _mailbox = new Mailbox<TMsg>();
+            DefaultTimeout = Timeout.Infinite;
+            _started = false;
+            _errorEvent = new Observable<Exception>();
         }
 
-        public IObservable<Exception> Errors => this._errorEvent;
+        public IObservable<Exception> Errors => _errorEvent;
 
-        public int CurrentQueueLength => this._mailbox.CurrentQueueLength;
+        public int CurrentQueueLength => _mailbox.CurrentQueueLength;
 
         public int DefaultTimeout { get; set; }
 
         public void Start()
         {
-            if (this._started)
+            if (_started)
+            {
                 throw new InvalidOperationException("MailboxProcessor already started");
+            }
 
-            this._started = true;
+            _started = true;
 
             // Protect the execution and send errors to the event.
             // Note that exception stack traces are lost in this design - in an extended design
@@ -63,12 +65,12 @@ namespace Actress
                 }
             }
 
-            Task.Run(StartAsync, this._cancellationToken);
+            Task.Run(StartAsync, _cancellationToken);
         }
 
         public void Post(TMsg message)
         {
-            this._mailbox.Post(message);
+            _mailbox.Post(message);
         }
 
         public TReply TryPostAndReply<TReply>(Func<IReplyChannel<TReply>, TMsg> msgf, int? timeout = null)
@@ -79,12 +81,14 @@ namespace Actress
                 tcs.SetResult(reply);
             }));
 
-            this._mailbox.Post(msg);
+            _mailbox.Post(msg);
 
             var task = tcs.Task;
 
-            if (task.Wait(timeout ?? this.DefaultTimeout))
+            if (task.Wait(timeout ?? DefaultTimeout))
+            {
                 return task.Result;
+            }
 
             return default(TReply);
         }
@@ -93,29 +97,35 @@ namespace Actress
         {
             var res = TryPostAndReply(buildMessage, timeout);
             if (!Equals(res, default(TReply)))
+            {
                 return res;
+            }
 
             throw new TimeoutException("MailboxProcessor PostAndReply timed out");
         }
 
         public Task<TReply> PostAndTryAsyncReply<TReply>(Func<IReplyChannel<TReply>, TMsg> msgf, int? timeout = null)
         {
-            timeout = timeout ?? this.DefaultTimeout;
+            timeout = timeout ?? DefaultTimeout;
             var tcs = new TaskCompletionSource<TReply>();
             var msg = msgf(new ReplyChannel<TReply>(reply =>
             {
                 tcs.SetResult(reply);
             }));
 
-            this._mailbox.Post(msg);
+            _mailbox.Post(msg);
 
             var task = tcs.Task;
 
             if (timeout == Timeout.Infinite)
+            {
                 return tcs.Task;
+            }
 
             if (task.Wait(timeout.Value))
+            {
                 return task;
+            }
 
             return Task.FromResult<TReply>(default(TReply));
         }
@@ -124,34 +134,36 @@ namespace Actress
         {
             var res = await PostAndTryAsyncReply(msgf, timeout);
             if (!Equals(res, default(TReply)))
+            {
                 return res;
+            }
 
             throw new TimeoutException("MailboxProcessor PostAndAsyncReply timed out");
         }
 
         public Task<TMsg> Receive(int? timeout = null)
         {
-            return this._mailbox.Receive(timeout ?? this.DefaultTimeout);
+            return _mailbox.Receive(timeout ?? DefaultTimeout);
         }
 
         public Task<TMsg> TryReceive(int? timeout = null)
         {
-            return this._mailbox.TryReceive(timeout ?? this.DefaultTimeout);
+            return _mailbox.TryReceive(timeout ?? DefaultTimeout);
         }
 
         public Task<T> Scan<T>(Func<TMsg, Task<T>> f, int? timeout = null) where T : class
         {
-            return this._mailbox.Scan(f, timeout ?? this.DefaultTimeout);
+            return _mailbox.Scan(f, timeout ?? DefaultTimeout);
         }
 
         public Task<T> TryScan<T>(Func<TMsg, Task<T>> f, int? timeout = null) where T : class
         {
-            return this._mailbox.TryScan(f, timeout ?? this.DefaultTimeout);
+            return _mailbox.TryScan(f, timeout ?? DefaultTimeout);
         }
 
         public void Dispose()
         {
-            this._mailbox.Dispose();
+            _mailbox.Dispose();
         }
     }
 }

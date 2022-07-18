@@ -2,7 +2,7 @@
 
 namespace Actress.Tests
 {
-    abstract class Option<T>
+    public abstract class Option<T>
     {
         public abstract T Value { get; }
         public abstract bool IsSome { get; }
@@ -11,7 +11,7 @@ namespace Actress.Tests
         public static implicit operator Option<T>(Option.NoneType rhs) => Option.OfNone<T>();
     }
 
-    class Option
+    public class Option
     {
         public class NoneType
         {
