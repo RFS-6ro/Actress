@@ -1,3 +1,5 @@
+using R6Tasks.Utils;
+
 namespace Actress
 {
     using System;
@@ -6,10 +8,10 @@ namespace Actress
 
     public static class MailboxProcessor
     {
-        public static MailboxProcessor<T> Start<T>(Func<MailboxProcessor<T>, Task> body, CancellationToken? cancellationToken = null)
+        public static MailboxProcessor<T> Start<T>(Func<MailboxProcessor<T>, Task> body, CancellationTokenSource? cancellationTokenSource = null)
             where T : class
         {
-            var mailboxProcessor = new MailboxProcessor<T>(body, cancellationToken);
+            var mailboxProcessor = new MailboxProcessor<T>(body, cancellationTokenSource);
             mailboxProcessor.Start();
             return mailboxProcessor;
         }
@@ -18,16 +20,20 @@ namespace Actress
     public class MailboxProcessor<TMsg> : IDisposable
     {
         private readonly Func<MailboxProcessor<TMsg>, Task> _body;
-        private readonly CancellationToken _cancellationToken;
+        private readonly CancellationTokenSource _cts;
         private readonly Mailbox<TMsg> _mailbox;
         private bool _started;
         private readonly Observable<Exception> _errorEvent;
 
-        public MailboxProcessor(Func<MailboxProcessor<TMsg>, Task> body, CancellationToken? cancellationToken = null)
+        public MailboxProcessor(Func<MailboxProcessor<TMsg>, Task> body, CancellationTokenSource cancellationTokenSource = null)
         {
             _body = body;
-            _cancellationToken = cancellationToken ?? Task.Factory.CancellationToken;
-            _mailbox = new Mailbox<TMsg>();
+            _cts = cancellationTokenSource;
+            if (_cts == null)
+            {
+                CancellationUtils.RefreshToken(ref _cts);
+            }
+            _mailbox = new Mailbox<TMsg>(_cts);
             DefaultTimeout = Timeout.Infinite;
             _started = false;
             _errorEvent = new Observable<Exception>();
@@ -65,16 +71,26 @@ namespace Actress
                 }
             }
 
-            Task.Run(StartAsync, _cancellationToken);
+            Task.Run(StartAsync);
         }
 
         public void Post(TMsg message)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             _mailbox.Post(message);
         }
 
         public TReply TryPostAndReply<TReply>(Func<IReplyChannel<TReply>, TMsg> msgf, int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             var tcs = new TaskCompletionSource<TReply>();
             var msg = msgf(new ReplyChannel<TReply>(reply =>
             {
@@ -95,6 +111,11 @@ namespace Actress
 
         public TReply PostAndReply<TReply>(Func<IReplyChannel<TReply>, TMsg> buildMessage, int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             var res = TryPostAndReply(buildMessage, timeout);
             if (!Equals(res, default(TReply)))
             {
@@ -106,6 +127,11 @@ namespace Actress
 
         public Task<TReply> PostAndTryAsyncReply<TReply>(Func<IReplyChannel<TReply>, TMsg> msgf, int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+            
             timeout = timeout ?? DefaultTimeout;
             var tcs = new TaskCompletionSource<TReply>();
             var msg = msgf(new ReplyChannel<TReply>(reply =>
@@ -132,6 +158,11 @@ namespace Actress
 
         public async Task<TReply> PostAndAsyncReply<TReply>(Func<IReplyChannel<TReply>, TMsg> msgf, int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+            
             var res = await PostAndTryAsyncReply(msgf, timeout);
             if (!Equals(res, default(TReply)))
             {
@@ -143,27 +174,47 @@ namespace Actress
 
         public Task<TMsg> Receive(int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             return _mailbox.Receive(timeout ?? DefaultTimeout);
         }
 
         public Task<TMsg> TryReceive(int? timeout = null)
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             return _mailbox.TryReceive(timeout ?? DefaultTimeout);
         }
 
         public Task<T> Scan<T>(Func<TMsg, Task<T>> f, int? timeout = null) where T : class
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             return _mailbox.Scan(f, timeout ?? DefaultTimeout);
         }
 
         public Task<T> TryScan<T>(Func<TMsg, Task<T>> f, int? timeout = null) where T : class
         {
+            if (_cts.IsCancellationRequested)
+            {
+                throw new OperationCanceledException();
+            }
+
             return _mailbox.TryScan(f, timeout ?? DefaultTimeout);
         }
 
         public void Dispose()
         {
-            _mailbox.Dispose();
+            _mailbox?.Dispose();
         }
     }
 }

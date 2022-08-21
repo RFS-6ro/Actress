@@ -7,13 +7,16 @@ namespace Actress
 
     public class Mailbox<TMsg> : IDisposable
     {
+        private readonly CancellationTokenSource _cts;
         private readonly Queue<TMsg> _arrivals;
+        
         private List<TMsg> _inboxStore;
         private TaskCompletionSource<bool> _savedCont;
         private AutoResetEvent _autoResetEvent;
 
-        public Mailbox()
+        public Mailbox(CancellationTokenSource cts)
         {
+            _cts = cts;
             _arrivals = new Queue<TMsg>();
         }
 
@@ -124,7 +127,7 @@ namespace Actress
         {
             async Task<TMsg> ProcessFirstArrival()
             {
-                while (true)
+                while (!_cts.IsCancellationRequested)
                 {
                     var res = ReceiveFromArrivals();
                     if (res != null)
@@ -140,6 +143,7 @@ namespace Actress
 
                     throw new TimeoutException("Mailbox Receive Timed Out");
                 }
+                throw new OperationCanceledException("Mailbox Cancellation");
             }
 
             var resFromInbox = ReceiveFromInbox();
@@ -156,7 +160,7 @@ namespace Actress
         {
             async Task<T> Func(Task timeoutTask1, CancellationTokenSource timeoutCts1)
             {
-                while (true)
+                while (!_cts.IsCancellationRequested)
                 {
                     var resP1 = ScanArrivals(f);
                     if (resP1 != null)
@@ -194,6 +198,7 @@ namespace Actress
                         throw new InvalidProgramException("should not happen - WaitOneNoTimeout always returns true");
                     }
                 }
+                throw new OperationCanceledException("Mailbox Cancellation");
             }
 
             async Task<T> ScanNoTimeout()
