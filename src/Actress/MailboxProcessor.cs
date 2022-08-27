@@ -8,7 +8,7 @@ namespace Actress
 
     public static class MailboxProcessor
     {
-        public static MailboxProcessor<T> Start<T>(Func<MailboxProcessor<T>, Task> body, CancellationTokenSource? cancellationTokenSource = null)
+        public static MailboxProcessor<T> Start<T>(Func<MailboxProcessor<T>, Task> body, CancellationTokenSource cancellationTokenSource = null)
             where T : class
         {
             var mailboxProcessor = new MailboxProcessor<T>(body, cancellationTokenSource);
